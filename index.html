@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>共用記事本</title>
+<style>
+:root{--bg:#f3f5f2;--card:#fff;--ink:#1d2b26;--mute:#6b7a73;--acc:#1f6f5c;--line:#d5ddd8;--danger:#b3261e;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#141a18;--card:#1d2623;--ink:#e6eee9;--mute:#94a39b;--acc:#4fb79d;--line:#33403b;--danger:#f2877f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--card);border-bottom:2px solid var(--acc);position:sticky;top:0;z-index:5}
+header a{font-size:1.2rem;font-weight:700;color:var(--ink);text-decoration:none}
+main{max-width:860px;margin:0 auto;padding:16px}
+button,.btn{font:inherit;background:var(--acc);color:#fff;border:0;border-radius:6px;padding:7px 14px;cursor:pointer;text-decoration:none;display:inline-block}
+button.ghost,.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button.del{background:var(--danger)}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.note{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;color:inherit;text-decoration:none}
+.note img,.note .ic{width:64px;height:64px;object-fit:cover;border-radius:6px;background:var(--bg);flex:none;display:grid;place-items:center;font-size:1.6rem}
+.note b{display:block}.mute{color:var(--mute);font-size:.85rem}
+input[type=text],textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+textarea{min-height:140px;resize:vertical}
+h2{margin:18px 0 6px;font-size:1.05rem}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+.bar .sw{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
+.bar .sw.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--acc)}
+canvas.pad{width:100%;height:auto;background:#fff;border:1px solid var(--line);border-radius:6px;touch-action:none;cursor:crosshair}
+.atts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.att{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:.85rem;overflow:hidden}
+.att .th{height:110px;display:grid;place-items:center;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:2rem;overflow:hidden}
+.att .th img{max-width:100%;max-height:100%}
+.att span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.att .row{display:flex;gap:6px;margin-top:6px}.att .row>*{padding:3px 8px;font-size:.8rem}
+.body{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+.view-draw{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px}
+#modal{position:fixed;inset:0;background:#000b;display:none;place-items:center;z-index:20;padding:12px}
+#modal.on{display:grid}
+#modal .box{background:var(--card);border-radius:10px;padding:12px;max-width:96vw;max-height:94vh;overflow:auto}
+.cw{position:relative;display:inline-block;touch-action:none;cursor:crosshair;line-height:0}
+.cw img{max-width:88vw;max-height:60vh;user-select:none;-webkit-user-drag:none}
+.sel{position:absolute;border:2px dashed #fff;outline:9999px solid #0007;display:none}
+.setup{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px}
+</style>
+</head>
+<body>
+<header><a href="#">📒 共用記事本</a><button id="newb">＋ 新增記事</button></header>
+<main id="app"></main>
+<div id="modal"><div class="box" id="mbox"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+/* ===== 設定:填入你的 Supabase 專案網址與 anon public key(見 README 步驟) ===== */
+const CFG = { url: "https://uoyuzpjfwlrlxedvbagi.supabase.co", key: "sb_publishable_tc0uP4BmDoZSkINX_SkDJA_UNEJeDAl" };
+const BUCKET = "notes";
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = d => new Date(d).toLocaleString("zh-TW", { hour12: false });
+const app = $("#app");
+let sb;
+
+function setupMsg() {
+  app.innerHTML = `<div class="setup"><b>尚未設定資料庫</b><p>請編輯 index.html 最上方的 CFG,填入 Supabase 的 url 與 key。步驟見 README.md。</p></div>`;
+}
+
+async function init() {
+  if (!CFG.url || !CFG.key) return setupMsg();
+  sb = supabase.createClient(CFG.url, CFG.key);
+  if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  addEventListener("hashchange", route);
+  $("#newb").onclick = () => (location.hash = "#new");
+  route();
+}
+
+function route() {
+  const h = location.hash.slice(1);
+  if (h === "new") return edit(null);
+  if (h.startsWith("e/")) return edit(h.slice(2));
+  if (h.startsWith("n/")) return view(h.slice(2));
+  list();
+}
+
+/* ---------- 首頁 ---------- */
+async function list() {
+  app.innerHTML = "載入中…";
+  const { data, error } = await sb.from("notes").select("id,title,created_at,atts").order("created_at", { ascending: false });
+  if (error) return (app.innerHTML = `<p>讀取失敗:${esc(error.message)}</p>`);
+  if (!data.length) return (app.innerHTML = `<p>還沒有記事。按右上角「＋ 新增記事」開始。</p>`);
+  app.innerHTML = data.map(n => {
+    const a = (n.atts || []).find(x => x.thumb || x.kind === "image");
+    const t = a ? `<img src="${esc(a.thumb || a.url)}" alt="">` : `<div class="ic">📝</div>`;
+    return `<a class="note" href="#n/${n.id}">${t}<div><b>${esc(n.title || "(無標題)")}</b><span class="mute">建立於 ${fmt(n.created_at)}</span></div></a>`;
+  }).join("");
+}
+
+/* ---------- 附件顯示 ---------- */
+function attHtml(a, i, editable) {
+  const th = a.kind === "image" ? `<img src="${esc(a.url)}" alt="">` : a.thumb ? `<img src="${esc(a.thumb)}" alt="">` : "📎";
+  return `<div class="att"><div class="th">${th}</div><span title="${esc(a.name)}">${esc(a.name)}</span>
+  <div class="row"><a class="btn ghost" href="${esc(a.url)}?download=${encodeURIComponent(a.name)}">下載</a>
+  ${editable ? `<button class="ghost" data-rm="${i}">移除</button>` : `<a class="btn ghost" href="${esc(a.url)}" target="_blank" rel="noopener">開啟</a>`}</div></div>`;
+}
+
+/* ---------- 檢視 ---------- */
+async function view(id) {
+  app.innerHTML = "載入中…";
+  const { data: n, error } = await sb.from("notes").select("*").eq("id", id).single();
+  if (error || !n) return (app.innerHTML = `<p>找不到這筆記事。<a href="#">回首頁</a></p>`);
+  app.innerHTML = `<p><a href="#">← 回首頁</a></p><h1>${esc(n.title || "(無標題)")}</h1>
+  <div class="mute">建立於 ${fmt(n.created_at)}</div>
+  ${n.body ? `<h2>文字</h2><div class="body">${esc(n.body)}</div>` : ""}
+  ${n.drawing ? `<h2>手寫</h2><img class="view-draw" src="${esc(n.drawing)}" alt="手寫內容">` : ""}
+  ${(n.atts || []).length ? `<h2>圖片與檔案</h2><div class="atts">${n.atts.map((a, i) => attHtml(a, i, false)).join("")}</div>` : ""}
+  <div class="bar" style="margin-top:20px"><a class="btn" href="#e/${n.id}">編輯</a><button class="del" id="del">刪除記事</button></div>`;
+  $("#del").onclick = async () => {
+    if (!confirm("確定刪除這筆記事?此動作無法復原,所有人都會看不到。")) return;
+    const paths = (n.atts || []).map(a => a.path).filter(Boolean);
+    if (paths.length) await sb.storage.from(BUCKET).remove(paths);
+    const { error } = await sb.from("notes").delete().eq("id", n.id);
+    if (error) return alert("刪除失敗:" + error.message);
+    location.hash = "";
+  };
+}
+
+/* ---------- 編輯 ---------- */
+const COLORS = ["#111111", "#d32f2f", "#1976d2", "#2e7d32", "#f9a825", "#7b1fa2"];
+async function edit(id) {
+  let n = { title: "", body: "", drawing: "", atts: [] };
+  if (id) {
+    const { data } = await sb.from("notes").select("*").eq("id", id).single();
+    if (data) n = data;
+  }
+  let color = COLORS[0], size = 4, eraser = false, dirty = false;
+  app.innerHTML = `<p><a href="${id ? "#n/" + id : "#"}">← 取消</a></p>
+  <h2>標題</h2><input type="text" id="t" maxlength="120" value="${esc(n.title)}">
+  <h2>文字</h2><textarea id="b">${esc(n.body)}</textarea>
+  <h2>手寫(色筆)</h2>
+  <div class="bar" id="tools">${COLORS.map((c, i) => `<button class="sw${i ? "" : " on"}" style="background:${c}" data-c="${c}" aria-label="顏色 ${c}"></button>`).join("")}
+    <label>粗細 <input type="range" id="sz" min="1" max="24" value="4"></label>
+    <button class="ghost" id="er">橡皮擦</button><button class="ghost" id="clr">全部清除</button></div>
+  <canvas class="pad" id="cv" width="900" height="450"></canvas>
+  <h2>圖片與檔案</h2>
+  <div class="bar"><label class="btn ghost">＋ 插入圖片<input type="file" id="fi" accept="image/*" hidden multiple></label>
+  <label class="btn ghost">＋ 插入 PDF 或其他檔案<input type="file" id="ff" hidden multiple></label><span class="mute" id="st"></span></div>
+  <div class="atts" id="al"></div>
+  <div class="bar" style="margin-top:20px"><button id="save">儲存記事</button></div>`;
+
+  const cv = $("#cv"), ctx = cv.getContext("2d");
+  ctx.lineCap = ctx.lineJoin = "round";
+  if (n.drawing) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, cv.width, cv.height); im.src = n.drawing; }
+  let down = false;
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.globalCompositeOperation = eraser ? "destination-out" : "source-over"; ctx.strokeStyle = color; ctx.lineWidth = eraser ? size * 3 : size; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + .01, y); ctx.stroke(); dirty = true; };
+  cv.onpointermove = e => { if (!down) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); };
+  cv.onpointerup = cv.onpointercancel = () => { down = false; };
+  $("#tools").onclick = e => {
+    const c = e.target.dataset.c;
+    if (c) { color = c; eraser = false; document.querySelectorAll(".sw").forEach(s => s.classList.toggle("on", s === e.target)); $("#er").classList.add("ghost"); }
+  };
+  $("#sz").oninput = e => (size = +e.target.value);
+  $("#er").onclick = e => { eraser = !eraser; e.target.classList.toggle("ghost", !eraser); document.querySelectorAll(".sw").forEach(s => s.classList.remove("on")); if (!eraser) document.querySelector(".sw").click(); };
+  $("#clr").onclick = () => { if (confirm("清除全部手寫內容?")) { ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, cv.width, cv.height); dirty = true; n.drawing = ""; } };
+
+  const renderAtts = () => {
+    $("#al").innerHTML = n.atts.map((a, i) => attHtml(a, i, true)).join("");
+    $("#al").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { n.atts.splice(+b.dataset.rm, 1); renderAtts(); });
+  };
+  renderAtts();
+
+  const upload = async (blob, name, type) => {
+    const ext = (name.match(/\.[A-Za-z0-9]{1,8}$/) || [""])[0];
+    const path = crypto.randomUUID() + ext;
+    const { error } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: type || "application/octet-stream" });
+    if (error) throw error;
+    return { path, url: sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl };
+  };
+  const pdfThumb = async file => {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pg = await pdf.getPage(1), v0 = pg.getViewport({ scale: 1 }), v = pg.getViewport({ scale: 220 / v0.width });
+    const c = document.createElement("canvas"); c.width = v.width; c.height = v.height;
+    await pg.render({ canvasContext: c.getContext("2d"), viewport: v }).promise;
+    return c.toDataURL("image/jpeg", .7);
+  };
+  const handle = async (files, imgMode) => {
+    for (const f of files) {
+      try {
+        $("#st").textContent = "上傳中:" + f.name;
+        const isImg = f.type.startsWith("image/"), isPdf = f.type === "application/pdf";
+        if (isImg) {
+          const blob = await cropDialog(f); if (!blob) continue;
+          const u = await upload(blob, f.name, blob.type);
+          n.atts.push({ kind: "image", name: f.name, ...u });
+        } else if (imgMode) { alert(f.name + " 不是圖片"); continue; }
+        else {
+          const u = await upload(f, f.name, f.type);
+          const a = { kind: isPdf ? "pdf" : "file", name: f.name, ...u };
+          if (isPdf) { try { a.thumb = await pdfThumb(f); } catch (e) { console.warn(e); } }
+          n.atts.push(a);
+        }
+        renderAtts();
+      } catch (e) { alert("上傳失敗:" + (e.message || e)); }
+    }
+    $("#st").textContent = "";
+  };
+  $("#fi").onchange = e => { handle([...e.target.files], true); e.target.value = ""; };
+  $("#ff").onchange = e => { handle([...e.target.files], false); e.target.value = ""; };
+
+  $("#save").onclick = async () => {
+    const row = { title: $("#t").value.trim() || "(無標題)", body: $("#b").value, atts: n.atts, drawing: dirty ? cv.toDataURL("image/png") : n.drawing };
+    const q = id ? sb.from("notes").update(row).eq("id", id).select().single() : sb.from("notes").insert(row).select().single();
+    const { data, error } = await q;
+    if (error) return alert("儲存失敗:" + error.message);
+    location.hash = "#n/" + data.id;
+  };
+}
+
+/* ---------- 圖片裁切 ---------- */
+function cropDialog(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file), m = $("#modal");
+    $("#mbox").innerHTML = `<p class="mute">在圖片上拖曳選取要保留的範圍(不選則使用整張)</p><div class="cw" id="cw"><img id="ci" src="${url}" alt=""><div class="sel" id="sel"></div></div>
+    <div class="bar"><button id="ok">插入</button><button class="ghost" id="cn">取消</button></div>`;
+    m.classList.add("on");
+    const cw = $("#cw"), img = $("#ci"), sel = $("#sel");
+    let s = null, r = null;
+    cw.onpointerdown = e => { const b = cw.getBoundingClientRect(); s = [e.clientX - b.left, e.clientY - b.top]; cw.setPointerCapture(e.pointerId); r = null; };
+    cw.onpointermove = e => {
+      if (!s) return; const b = cw.getBoundingClientRect();
+      const x = Math.min(Math.max(e.clientX - b.left, 0), b.width), y = Math.min(Math.max(e.clientY - b.top, 0), b.height);
+      r = { x: Math.min(s[0], x), y: Math.min(s[1], y), w: Math.abs(x - s[0]), h: Math.abs(y - s[1]) };
+      Object.assign(sel.style, { display: "block", left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
+    };
+    cw.onpointerup = () => { s = null; };
+    const done = blob => { m.classList.remove("on"); URL.revokeObjectURL(url); resolve(blob); };
+    $("#cn").onclick = () => done(null);
+    $("#ok").onclick = () => {
+      if (!r || r.w < 8 || r.h < 8) return done(file);
+      const k = img.naturalWidth / img.clientWidth, c = document.createElement("canvas");
+      c.width = Math.round(r.w * k); c.height = Math.round(r.h * k);
+      c.getContext("2d").drawImage(img, r.x * k, r.y * k, r.w * k, r.h * k, 0, 0, c.width, c.height);
+      const type = file.type === "image/png" ? "image/png" : "image/jpeg";
+      c.toBlob(b => done(b), type, .92);
+    };
+  });
+}
+
+init();
+</script>
+</body>
+</html>
