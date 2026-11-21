@@ -27,6 +27,7 @@ h2{margin:18px 0 6px;font-size:1.05rem}
 .att{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:.85rem;overflow:hidden}
 .att .th{height:110px;display:grid;place-items:center;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:2rem;overflow:hidden}
 .att .th img{max-width:100%;max-height:100%}
+.att .th audio{width:100%}
 .att span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .att .row{display:flex;gap:6px;margin-top:6px}.att .row>*{padding:3px 8px;font-size:.8rem}
 .body{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
@@ -92,7 +93,7 @@ async function list() {
 
 /* ---------- 附件顯示 ---------- */
 function attHtml(a, i, editable) {
-  const th = a.kind === "image" ? `<img src="${esc(a.url)}" alt="">` : a.thumb ? `<img src="${esc(a.thumb)}" alt="">` : "📎";
+  const th = a.kind === "audio" ? `<audio controls preload="none" src="${esc(a.url)}"></audio>` : a.kind === "image" ? `<img src="${esc(a.url)}" alt="">` : a.thumb ? `<img src="${esc(a.thumb)}" alt="">` : "📎";
   return `<div class="att"><div class="th">${th}</div><span title="${esc(a.name)}">${esc(a.name)}</span>
   <div class="row"><a class="btn ghost" href="${esc(a.url)}?download=${encodeURIComponent(a.name)}">下載</a>
   ${editable ? `<button class="ghost" data-rm="${i}">移除</button>` : `<a class="btn ghost" href="${esc(a.url)}" target="_blank" rel="noopener">開啟</a>`}</div></div>`;
@@ -130,7 +131,7 @@ async function edit(id) {
   <h2>文字</h2><textarea id="b">${esc(n.body)}</textarea>
   <h2>圖片與檔案</h2>
   <div class="bar"><label class="btn ghost">＋ 插入圖片<input type="file" id="fi" accept="image/*" hidden multiple></label>
-  <label class="btn ghost">＋ 插入 PDF 或其他檔案<input type="file" id="ff" hidden multiple></label><span class="mute" id="st"></span></div>
+  <label class="btn ghost">＋ 插入 PDF 或其他檔案<input type="file" id="ff" hidden multiple></label><button class="ghost" id="rec">🎙 開始錄音</button><span class="mute" id="st"></span></div>
   <div class="atts" id="al"></div>
   <div class="bar" style="margin-top:20px"><button id="save">儲存記事</button></div>`;
 
@@ -176,6 +177,34 @@ async function edit(id) {
   };
   $("#fi").onchange = e => { handle([...e.target.files], true); e.target.value = ""; };
   $("#ff").onchange = e => { handle([...e.target.files], false); e.target.value = ""; };
+
+  let mr = null, chunks = [], tm = null;
+  $("#rec").onclick = async () => {
+    const b = $("#rec");
+    if (mr && mr.state === "recording") return mr.stop();
+    if (!navigator.mediaDevices || !window.MediaRecorder) return alert("此瀏覽器不支援錄音");
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return alert("無法使用麥克風,請在瀏覽器允許麥克風權限"); }
+    chunks = []; mr = new MediaRecorder(stream);
+    mr.ondataavailable = e => e.data.size && chunks.push(e.data);
+    mr.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      clearInterval(tm); b.textContent = "🎙 開始錄音"; b.classList.add("ghost"); b.classList.remove("del");
+      const type = (mr.mimeType || "audio/webm").split(";")[0];
+      const ext = type.includes("mp4") ? ".m4a" : type.includes("ogg") ? ".ogg" : ".webm";
+      const name = "錄音 " + new Date().toLocaleString("zh-TW", { hour12: false }).replace(/[\/:]/g, "-") + ext;
+      try {
+        $("#st").textContent = "上傳錄音中…";
+        const u = await upload(new Blob(chunks, { type }), name, type);
+        n.atts.push({ kind: "audio", name, ...u });
+        renderAtts();
+      } catch (e) { alert("錄音上傳失敗:" + (e.message || e)); }
+      $("#st").textContent = "";
+    };
+    mr.start();
+    let sec = 0; b.classList.remove("ghost"); b.classList.add("del"); b.textContent = "⏹ 停止錄音 0:00";
+    tm = setInterval(() => { sec++; b.textContent = "⏹ 停止錄音 " + Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }, 1000);
+  };
 
   $("#save").onclick = async () => {
     const row = { title: $("#t").value.trim() || "(無標題)", body: $("#b").value, atts: n.atts };
