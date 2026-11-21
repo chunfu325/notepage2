@@ -31,19 +31,12 @@ h2{margin:18px 0 6px;font-size:1.05rem}
 .att .row{display:flex;gap:6px;margin-top:6px}.att .row>*{padding:3px 8px;font-size:.8rem}
 .body{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
 .body a{color:var(--acc);word-break:break-all}
-#modal{position:fixed;inset:0;background:#000b;display:none;place-items:center;z-index:20;padding:12px}
-#modal.on{display:grid}
-#modal .box{background:var(--card);border-radius:10px;padding:12px;max-width:96vw;max-height:94vh;overflow:auto}
-.cw{position:relative;display:inline-block;touch-action:none;cursor:crosshair;line-height:0}
-.cw img{max-width:88vw;max-height:60vh;user-select:none;-webkit-user-drag:none}
-.sel{position:absolute;border:2px dashed #fff;outline:9999px solid #0007;display:none}
 .setup{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px}
 </style>
 </head>
 <body>
 <header><a href="#">📒 共用記事本</a><button id="newb">＋ 新增記事</button></header>
 <main id="app"></main>
-<div id="modal"><div class="box" id="mbox"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -167,8 +160,7 @@ async function edit(id) {
         $("#st").textContent = "上傳中:" + f.name;
         const isImg = f.type.startsWith("image/"), isPdf = f.type === "application/pdf";
         if (isImg) {
-          const blob = await cropDialog(f); if (!blob) continue;
-          const u = await upload(blob, f.name, blob.type);
+          const u = await upload(f, f.name, f.type);
           n.atts.push({ kind: "image", name: f.name, ...u });
         } else if (imgMode) { alert(f.name + " 不是圖片"); continue; }
         else {
@@ -192,36 +184,6 @@ async function edit(id) {
     if (error) return alert("儲存失敗:" + error.message);
     location.hash = "#n/" + data.id;
   };
-}
-
-/* ---------- 圖片裁切 ---------- */
-function cropDialog(file) {
-  return new Promise(resolve => {
-    const url = URL.createObjectURL(file), m = $("#modal");
-    $("#mbox").innerHTML = `<p class="mute">在圖片上拖曳選取要保留的範圍(不選則使用整張)</p><div class="cw" id="cw"><img id="ci" src="${url}" alt=""><div class="sel" id="sel"></div></div>
-    <div class="bar"><button id="ok">插入</button><button class="ghost" id="cn">取消</button></div>`;
-    m.classList.add("on");
-    const cw = $("#cw"), img = $("#ci"), sel = $("#sel");
-    let s = null, r = null;
-    cw.onpointerdown = e => { const b = cw.getBoundingClientRect(); s = [e.clientX - b.left, e.clientY - b.top]; cw.setPointerCapture(e.pointerId); r = null; };
-    cw.onpointermove = e => {
-      if (!s) return; const b = cw.getBoundingClientRect();
-      const x = Math.min(Math.max(e.clientX - b.left, 0), b.width), y = Math.min(Math.max(e.clientY - b.top, 0), b.height);
-      r = { x: Math.min(s[0], x), y: Math.min(s[1], y), w: Math.abs(x - s[0]), h: Math.abs(y - s[1]) };
-      Object.assign(sel.style, { display: "block", left: r.x + "px", top: r.y + "px", width: r.w + "px", height: r.h + "px" });
-    };
-    cw.onpointerup = () => { s = null; };
-    const done = blob => { m.classList.remove("on"); URL.revokeObjectURL(url); resolve(blob); };
-    $("#cn").onclick = () => done(null);
-    $("#ok").onclick = () => {
-      if (!r || r.w < 8 || r.h < 8) return done(file);
-      const k = img.naturalWidth / img.clientWidth, c = document.createElement("canvas");
-      c.width = Math.round(r.w * k); c.height = Math.round(r.h * k);
-      c.getContext("2d").drawImage(img, r.x * k, r.y * k, r.w * k, r.h * k, 0, 0, c.width, c.height);
-      const type = file.type === "image/png" ? "image/png" : "image/jpeg";
-      c.toBlob(b => done(b), type, .92);
-    };
-  });
 }
 
 init();
