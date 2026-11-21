@@ -23,9 +23,6 @@ input[type=text],textarea{width:100%;font:inherit;padding:8px;border:1px solid v
 textarea{min-height:140px;resize:vertical}
 h2{margin:18px 0 6px;font-size:1.05rem}
 .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
-.bar .sw{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);cursor:pointer;padding:0}
-.bar .sw.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--acc)}
-canvas.pad{width:100%;height:auto;background:#fff;border:1px solid var(--line);border-radius:6px;touch-action:none;cursor:crosshair}
 .atts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .att{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:.85rem;overflow:hidden}
 .att .th{height:110px;display:grid;place-items:center;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:2rem;overflow:hidden}
@@ -34,7 +31,6 @@ canvas.pad{width:100%;height:auto;background:#fff;border:1px solid var(--line);b
 .att .row{display:flex;gap:6px;margin-top:6px}.att .row>*{padding:3px 8px;font-size:.8rem}
 .body{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
 .body a{color:var(--acc);word-break:break-all}
-.view-draw{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px}
 #modal{position:fixed;inset:0;background:#000b;display:none;place-items:center;z-index:20;padding:12px}
 #modal.on{display:grid}
 #modal .box{background:var(--card);border-radius:10px;padding:12px;max-width:96vw;max-height:94vh;overflow:auto}
@@ -117,7 +113,6 @@ async function view(id) {
   app.innerHTML = `<p><a href="#">← 回首頁</a></p><h1>${esc(n.title || "(無標題)")}</h1>
   <div class="mute">建立於 ${fmt(n.created_at)}</div>
   ${n.body ? `<h2>文字</h2><div class="body">${linkify(n.body)}</div>` : ""}
-  ${n.drawing ? `<h2>手寫</h2><img class="view-draw" src="${esc(n.drawing)}" alt="手寫內容">` : ""}
   ${(n.atts || []).length ? `<h2>圖片與檔案</h2><div class="atts">${n.atts.map((a, i) => attHtml(a, i, false)).join("")}</div>` : ""}
   <div class="bar" style="margin-top:20px"><a class="btn" href="#e/${n.id}">編輯</a><button class="del" id="del">刪除記事</button></div>`;
   $("#del").onclick = async () => {
@@ -131,43 +126,20 @@ async function view(id) {
 }
 
 /* ---------- 編輯 ---------- */
-const COLORS = ["#111111", "#d32f2f", "#1976d2", "#2e7d32", "#f9a825", "#7b1fa2"];
 async function edit(id) {
-  let n = { title: "", body: "", drawing: "", atts: [] };
+  let n = { title: "", body: "", atts: [] };
   if (id) {
     const { data } = await sb.from("notes").select("*").eq("id", id).single();
     if (data) n = data;
   }
-  let color = COLORS[0], size = 4, eraser = false, dirty = false;
   app.innerHTML = `<p><a href="${id ? "#n/" + id : "#"}">← 取消</a></p>
   <h2>標題</h2><input type="text" id="t" maxlength="120" value="${esc(n.title)}">
   <h2>文字</h2><textarea id="b">${esc(n.body)}</textarea>
-  <h2>手寫(色筆)</h2>
-  <div class="bar" id="tools">${COLORS.map((c, i) => `<button class="sw${i ? "" : " on"}" style="background:${c}" data-c="${c}" aria-label="顏色 ${c}"></button>`).join("")}
-    <label>粗細 <input type="range" id="sz" min="1" max="24" value="4"></label>
-    <button class="ghost" id="er">橡皮擦</button><button class="ghost" id="clr">全部清除</button></div>
-  <canvas class="pad" id="cv" width="900" height="450"></canvas>
   <h2>圖片與檔案</h2>
   <div class="bar"><label class="btn ghost">＋ 插入圖片<input type="file" id="fi" accept="image/*" hidden multiple></label>
   <label class="btn ghost">＋ 插入 PDF 或其他檔案<input type="file" id="ff" hidden multiple></label><span class="mute" id="st"></span></div>
   <div class="atts" id="al"></div>
   <div class="bar" style="margin-top:20px"><button id="save">儲存記事</button></div>`;
-
-  const cv = $("#cv"), ctx = cv.getContext("2d");
-  ctx.lineCap = ctx.lineJoin = "round";
-  if (n.drawing) { const im = new Image(); im.onload = () => ctx.drawImage(im, 0, 0, cv.width, cv.height); im.src = n.drawing; }
-  let down = false;
-  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
-  cv.onpointerdown = e => { down = true; cv.setPointerCapture(e.pointerId); const [x, y] = pos(e); ctx.globalCompositeOperation = eraser ? "destination-out" : "source-over"; ctx.strokeStyle = color; ctx.lineWidth = eraser ? size * 3 : size; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + .01, y); ctx.stroke(); dirty = true; };
-  cv.onpointermove = e => { if (!down) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); };
-  cv.onpointerup = cv.onpointercancel = () => { down = false; };
-  $("#tools").onclick = e => {
-    const c = e.target.dataset.c;
-    if (c) { color = c; eraser = false; document.querySelectorAll(".sw").forEach(s => s.classList.toggle("on", s === e.target)); $("#er").classList.add("ghost"); }
-  };
-  $("#sz").oninput = e => (size = +e.target.value);
-  $("#er").onclick = e => { eraser = !eraser; e.target.classList.toggle("ghost", !eraser); document.querySelectorAll(".sw").forEach(s => s.classList.remove("on")); if (!eraser) document.querySelector(".sw").click(); };
-  $("#clr").onclick = () => { if (confirm("清除全部手寫內容?")) { ctx.globalCompositeOperation = "source-over"; ctx.clearRect(0, 0, cv.width, cv.height); dirty = true; n.drawing = ""; } };
 
   const renderAtts = () => {
     $("#al").innerHTML = n.atts.map((a, i) => attHtml(a, i, true)).join("");
@@ -214,7 +186,7 @@ async function edit(id) {
   $("#ff").onchange = e => { handle([...e.target.files], false); e.target.value = ""; };
 
   $("#save").onclick = async () => {
-    const row = { title: $("#t").value.trim() || "(無標題)", body: $("#b").value, atts: n.atts, drawing: dirty ? cv.toDataURL("image/png") : n.drawing };
+    const row = { title: $("#t").value.trim() || "(無標題)", body: $("#b").value, atts: n.atts };
     const q = id ? sb.from("notes").update(row).eq("id", id).select().single() : sb.from("notes").insert(row).select().single();
     const { data, error } = await q;
     if (error) return alert("儲存失敗:" + error.message);
