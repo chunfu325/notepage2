@@ -33,6 +33,7 @@ canvas.pad{width:100%;height:auto;background:#fff;border:1px solid var(--line);b
 .att span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .att .row{display:flex;gap:6px;margin-top:6px}.att .row>*{padding:3px 8px;font-size:.8rem}
 .body{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+.body a{color:var(--acc);word-break:break-all}
 .view-draw{max-width:100%;background:#fff;border:1px solid var(--line);border-radius:6px}
 #modal{position:fixed;inset:0;background:#000b;display:none;place-items:center;z-index:20;padding:12px}
 #modal.on{display:grid}
@@ -57,6 +58,11 @@ const BUCKET = "notes";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const linkify = s => esc(s).replace(/https?:\/\/(?:(?!&(?:lt|gt|quot|#39);)[^\s])+/g, m => {
+  const t = (m.match(/[.,;:!?)\]、。,;:!?)」』]+$/) || [""])[0];
+  const u = t ? m.slice(0, -t.length) : m;
+  return `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>${t}`;
+});
 const fmt = d => new Date(d).toLocaleString("zh-TW", { hour12: false });
 const app = $("#app");
 let sb;
@@ -110,7 +116,7 @@ async function view(id) {
   if (error || !n) return (app.innerHTML = `<p>找不到這筆記事。<a href="#">回首頁</a></p>`);
   app.innerHTML = `<p><a href="#">← 回首頁</a></p><h1>${esc(n.title || "(無標題)")}</h1>
   <div class="mute">建立於 ${fmt(n.created_at)}</div>
-  ${n.body ? `<h2>文字</h2><div class="body">${esc(n.body)}</div>` : ""}
+  ${n.body ? `<h2>文字</h2><div class="body">${linkify(n.body)}</div>` : ""}
   ${n.drawing ? `<h2>手寫</h2><img class="view-draw" src="${esc(n.drawing)}" alt="手寫內容">` : ""}
   ${(n.atts || []).length ? `<h2>圖片與檔案</h2><div class="atts">${n.atts.map((a, i) => attHtml(a, i, false)).join("")}</div>` : ""}
   <div class="bar" style="margin-top:20px"><a class="btn" href="#e/${n.id}">編輯</a><button class="del" id="del">刪除記事</button></div>`;
